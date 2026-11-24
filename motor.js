@@ -41,10 +41,10 @@ const TEXTOS_PADRAO = {
   sim: 'Perfeito, {nome}! Seu horário está confirmado. Te espero {quando} às {hora}, na {endereco}. 💗',
   nao: 'Tudo bem, {nome}! Vou liberar esse horário. Se quiser marcar outro dia, é só escolher aqui: {link} 💗',
   retorno: 'Oii {nome}, seu último {servico} foi dia {data_atendimento} e, {manter}, o ideal é que você retorne {janela}. Vou te enviar o link pra você ver quais horários tenho disponíveis pra te atender: {link} 💗',
-  cuidados: 'Oi, {nome}! Foi um prazer te atender. 💗 Seguem os cuidados com seu {servico}: {cuidados}. Qualquer dúvida, é só me chamar.',
+  cuidados: 'Oi, {nome}! Seguem os cuidados com seu {servico}:\n{cuidados}\n\nObrigada pela confiança, foi um prazer te atender! 💗 Qualquer dúvida, estou à disposição.',
   conflito: 'Oii {nome}, que pena! O horário de {hora} do {quando} acabou de ser reservado por outra cliente. 😕 Escolhe outro horário aqui, por favor: {link} 💗',
 };
-const monta = (cfg, tipo, v) => String((cfg.textos || {})[tipo] || TEXTOS_PADRAO[tipo]).replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : '').replace(/\s+([.,!?])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+const monta = (cfg, tipo, v) => String((cfg.textos || {})[tipo] || TEXTOS_PADRAO[tipo]).replace(/\{(\w+)\}/g, (m, k) => v[k] != null ? String(v[k]) : '').replace(/[ \t]+([.,!?])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim(); /* mantém as quebras de linha (a Uazapi aceita) */
 
 /* ---------- WhatsApp (Uazapi) ---------- */
 const digitos = t => String(t || '').replace(/\D/g, '');
@@ -185,7 +185,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   for (const f of fila) {
     if (restante <= 0) { L('limite atingido; o resto vai na próxima rodada'); break; }
     const a = f.a, c = f.c;
-    const v = { nome: primeiro(c.nome), servico: f.tipo === 'retorno' ? minusc(nomeServ(a.servicoNome)) : nomeServ(a.servicoNome), quando: a.data ? quando(a.data, hoje) : '', hora: a.hora || '', endereco: cfg.endereco || '', link: cfg.linkSite || '', cuidados: String(a.cuidados || '').replace(/\s*\n+\s*/g, ' • ').replace(/[.\s]+$/, '') };
+    const v = { nome: primeiro(c.nome), servico: f.tipo === 'retorno' ? minusc(nomeServ(a.servicoNome)) : nomeServ(a.servicoNome), quando: a.data ? quando(a.data, hoje) : '', hora: a.hora || '', endereco: cfg.endereco || '', link: cfg.linkSite || '', cuidados: String(a.cuidados || '').split(/\n+/).map(x => x.trim().replace(/[.;]+$/, '')).filter(Boolean).map(x => '• ' + x).join('\n') };
     if (f.tipo === 'retorno') Object.assign(v, { data_atendimento: dExt(a.dataAtendimento), janela: entre(addDias(a.dataAtendimento, a.de || 20), addDias(a.dataAtendimento, a.ate || 30)), manter: ehSobrancelha(a.servicoNome) ? 'pra manter suas sobrancelhas lindas' : 'pra manter tudo sempre lindo' });
     const texto = monta(cfg, f.tipo, v);
     if (!liberado(c.telefone)) { L(`(teste) segurado: ${f.id}`); continue; }
