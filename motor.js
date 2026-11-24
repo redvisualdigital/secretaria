@@ -63,7 +63,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   cfg.tipos = cfg.tipos || {}; cfg.janela = cfg.janela || ['07:00', '23:00'];
   const TESTE = Array.isArray(cfg.teste) ? cfg.teste.map(s => digitos(s).slice(-8)).filter(Boolean) : TESTE_ENV;
   const liberado = t => !TESTE.length || TESTE.includes(digitos(t).slice(-8));
-  const vale = tipo => cfg.tipos[tipo] !== false && !(tipo === 'cuidados' && cfg.tipos.cuidados !== true);
+  const vale = tipo => (tipo === 'cuidados' || tipo === 'conflito') ? cfg.tipos[tipo] === true : cfg.tipos[tipo] !== false; /* cuidados e conflito só se ligados de propósito (conflito virou só notificação na agenda, 24/11) */
   const log = []; const L = s => { log.push(s); console.log(s); };
   L(`[${hoje} ${hm}] ativo=${cfg.ativo !== false} teste=${TESTE.length ? 'sim' : 'não'} dry=${DRY}`);
   const marca = async extra => { if (!DRY) await cfgRef.set({ ultimaRodada: agoraISO(), ...(extra || {}) }, { merge: true }); };
