@@ -177,7 +177,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   if (vale('cuidados') && hm >= (cfg.cuidadosDe || '09:00')) {
     const cs = (await db.collection('acompanhamentos').where('tipo', '==', 'cuidados').where('feito', '==', false).get()).docs.filter(d => d.data().data <= hoje && d.data().data >= addDias(hoje, -2));
     await carregaClientes(cs.map(d => d.data().clienteId));
-    for (const d of cs) { const x = d.data(); const c = clientes[x.clienteId]; const cuid = (svcById(x.servicoId).cuidados || '').trim(); if (c && numeroBR(c.telefone) && cuid) fila.push({ id: 'cuid-' + d.id, tipo: 'cuidados', a: { ...x, cuidados: cuid }, c, ref: d.ref }); }
+    for (const d of cs) { const x = d.data(); const c = clientes[x.clienteId]; const sv = svcById(x.servicoId); const cuid = (sv.cuidados || '').trim(); /* combo: os cuidados e o nome são os da parte da sobrancelha (cuidadosNome) */ if (c && numeroBR(c.telefone) && cuid) fila.push({ id: 'cuid-' + d.id, tipo: 'cuidados', a: { ...x, cuidados: cuid, servicoNome: sv.cuidadosNome || x.servicoNome }, c, ref: d.ref }); }
   }
 
   const envHoje = (await envCol.where('dia', '==', hoje).count().get()).data().count;
