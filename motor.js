@@ -156,7 +156,8 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     const c = clientes[a.clienteId]; if (!c || !numeroBR(c.telefone)) continue;
     if (vale('confirmacao') && a.status === 'agendado' && (String(a.criadoEm || '') >= (cfg.inicio || '') || (cfg.antigosAte && a.data <= cfg.antigosAte)) && !wa(a).conf) /* antigosAte: horários marcados antes da secretária também confirmam, só até essa data (liberação de 24/11) */ fila.push({ id: 'conf-' + a.id, tipo: 'confirmacao', a, c });
     /* quem agendou na véspera (ou no mesmo dia) acabou de receber a confirmação: não precisa de lembrete */
-    if (vale('lembrete') && a.status === 'agendado' && a.data === addDias(hoje, 1) && !(diaBR(a.criadoEm) >= addDias(a.data, -1)) && (FORCAR || hm >= (cfg.lembreteDe || '09:00')) && !wa(a).lemb) fila.push({ id: 'lemb-' + a.id, tipo: 'lembrete', a, c });
+    const tAg = Date.parse(`${a.data}T${a.hora || '00:00'}:00-03:00`), falta = tAg - Date.now();
+    if (vale('lembrete') && a.status === 'agendado' && (FORCAR || (falta <= 24 * 3600e3 && falta > 0)) && !(diaBR(a.criadoEm) >= addDias(a.data, -1)) && !wa(a).lemb) fila.push({ id: 'lemb-' + a.id, tipo: 'lembrete', a, c });
   }
   /* pedidos do site que bateram com outro horário: avisa a cliente com o link */
   if (vale('conflito')) {
@@ -177,7 +178,8 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   }
   /* cuidados no dia seguinte ao atendimento (desligado até a Lyslie ligar) */
   if (vale('cuidados') && hm >= (cfg.cuidadosDe || '09:00')) {
-    const cs = (await db.collection('acompanhamentos').where('tipo', '==', 'cuidados').where('feito', '==', false).get()).docs.filter(d => d.data().data <= hoje && d.data().data >= addDias(hoje, -2));
+    const agsHoje = new Set(ags.filter(a => a.data === hoje && a.status === 'concluido').map(a => a.id));
+    const cs = (await db.collection('acompanhamentos').where('tipo', '==', 'cuidados').where('feito', '==', false).get()).docs.filter(d => agsHoje.has(d.data().agendamentoId));
     await carregaClientes(cs.map(d => d.data().clienteId));
     for (const d of cs) { const x = d.data(); const c = clientes[x.clienteId]; const sv = svcById(x.servicoId); const cuid = (sv.cuidados || '').trim(); /* combo: os cuidados e o nome são os da parte da sobrancelha (cuidadosNome) */ if (c && numeroBR(c.telefone) && cuid) fila.push({ id: 'cuid-' + d.id, tipo: 'cuidados', a: { ...x, cuidados: cuid, servicoNome: sv.cuidadosNome || x.servicoNome }, c, ref: d.ref }); }
   }
