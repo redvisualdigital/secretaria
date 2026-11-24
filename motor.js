@@ -79,7 +79,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   /* 0b) o que o site público pode ver: catálogo e horários ocupados (sem nome de cliente) */
   if (!DRY) {
     const exp = cfg.expediente || { ini: '08:00', fim: '18:00', passo: 30, dias: [1, 2, 3, 4, 5, 6] };
-    const servPub = (geral.servicos || []).filter(x => x.duracao && (x.profId || (x.divisao || []).length)).map(x => { const profs = (x.divisao || []).length ? x.divisao.map(d => d.profId) : [x.profId]; return { id: x.id, nome: x.nome, preco: x.preco ?? null, duracao: x.duracao, profId: x.profId || profs[0], profs, combo: profs.length > 1 }; });
+    const servPub = (geral.servicos || []).filter(x => !x.ocultarSite && x.duracao && (x.profId || (x.divisao || []).length)).map(x => { const profs = (x.divisao || []).length ? x.divisao.map(d => d.profId) : [x.profId]; return { id: x.id, nome: x.nome, preco: x.preco ?? null, duracao: x.duracao, profId: x.profId || profs[0], profs, combo: profs.length > 1 }; });
     await db.doc('publico/catalogo').set({ estudio: geral.estudio || '', profissionais: (geral.profissionais || []).map(x => ({ id: x.id, nome: x.nome })), servicos: servPub, expediente: exp, atualizadoEm: new Date().toISOString() });
     const ate = addDias(hoje, 45), ocup = {};
     for (const a of ags) { if (a.data > ate || ['cancelado', 'faltou'].includes(a.status)) continue; const k = a.data; (ocup[k] = ocup[k] || []).push([a.profId || '', toMin(a.hora), toMin(a.hora) + (Number(a.duracao) || 60)]); for (const d of (a.divisao || [])) if (d.profId && d.profId !== a.profId) ocup[k].push([d.profId, toMin(a.hora), toMin(a.hora) + (Number(a.duracao) || 60)]); }
