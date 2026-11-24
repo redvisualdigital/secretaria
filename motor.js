@@ -100,7 +100,16 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
       const sim = /^(sim|s|confirmo|confirmado|pode confirmar|ok|👍|✅)\b/.test(t) || t === 'sim!' ;
       const nao = /^(n[aã]o|nao posso|não vou)/.test(t);
       await e.ref.update({ resposta: sim ? 'sim' : nao ? 'nao' : 'outra', respostaTexto: t.slice(0, 200), respondidoEm: new Date().toISOString() });
-      if (sim) await db.collection('agendamentos').doc(v.agId).update({ status: 'confirmado', confirmadoPor: 'whatsapp', confirmadoEm: new Date().toISOString() });
+      const agRef = db.collection('agendamentos').doc(v.agId); const ag = (await agRef.get()).data() || {}; const cl = clientes[v.clienteId] || {};
+      if (sim) await agRef.update({ status: 'confirmado', confirmadoPor: 'whatsapp', confirmadoEm: new Date().toISOString() });
+      if (nao) await agRef.update({ status: 'cancelado', canceladoPor: 'whatsapp', canceladoEm: new Date().toISOString(), obs: ((ag.obs || '') + ' · cancelado pela cliente no WhatsApp').replace(/^ · /, '') });
+      /* resposta da secretária (aprovada pela Lyslie em 23/11) */
+      if ((sim || nao) && liberado(cl.telefone)) {
+        const txt = sim
+          ? `Perfeito, ${primeiro(cl.nome)}! Seu horário está confirmado. Te espero ${quando(ag.data, hoje)} às ${ag.hora}${cfg.endereco ? ', na ' + cfg.endereco : ''}. 💗`
+          : `Tudo bem, ${primeiro(cl.nome)}! Vou liberar esse horário. Se quiser marcar outro dia, é só escolher aqui: ${cfg.linkSite || ''} 💗`;
+        try { await uaz('/send/text', { number: v.chatid.split('@')[0], text: txt, delay: 2000, track_source: 'secretaria', track_id: 'resp-' + e.id }); await e.ref.update({ respostaEnviada: txt }); } catch (err) { console.log('erro resposta envio', err.message); }
+      }
       console.log(`resposta ${v.agId}: ${sim ? 'SIM' : nao ? 'NÃO' : 'outra'} (${t.slice(0, 40)})`);
     } catch (err) { console.log('erro resposta', err.message); }
   }
