@@ -65,9 +65,10 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   const liberado = t => !TESTE.length || TESTE.includes(digitos(t).slice(-8));
   const vale = tipo => (tipo === 'cuidados' || tipo === 'conflito') ? cfg.tipos[tipo] === true : cfg.tipos[tipo] !== false; /* cuidados e conflito só se ligados de propósito (conflito virou só notificação na agenda, 24/11) */
   const log = []; const L = s => { log.push(s); console.log(s); };
-  L(`[${hoje} ${hm}] ativo=${cfg.ativo !== false} teste=${TESTE.length ? 'sim' : 'não'} dry=${DRY}`);
+  L(`[${process.env.CLIENTE || ''} ${hoje} ${hm}] mensagens=${cfg.ativo !== false ? 'ligadas' : 'desligadas'} teste=${TESTE.length ? 'sim' : 'não'} dry=${DRY}`);
   const marca = async extra => { if (!DRY) await cfgRef.set({ ultimaRodada: agoraISO(), ...(extra || {}) }, { merge: true }); };
-  if (cfg.ativo === false) { await marca(); return; }
+  /* secretária desligada: as mensagens param, mas o site continua ligado à agenda (pedidos e horários livres) */
+  const envia = cfg.ativo !== false && !!TOKEN;
   const dentro = FORCAR || (hm >= cfg.janela[0] && hm <= cfg.janela[1]);
 
   const geral = (await db.doc('config/geral').get()).data() || {};
@@ -121,7 +122,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   if (!DRY && cfg.hashAgenda !== hAg) { await db.doc('publico/agenda').set({ ocupados: ocup, atualizadoEm: agoraISO() }); extraCfg.hashAgenda = hAg; }
 
   /* 2) respostas ao lembrete: "sim" confirma, "não" libera o horário; a secretária responde */
-  const pend = (await envCol.where('tipo', '==', 'lembrete').where('resposta', '==', null).get()).docs;
+  const pend = envia ? (await envCol.where('tipo', '==', 'lembrete').where('resposta', '==', null).get()).docs : [];
   await carregaClientes(pend.map(e => e.data().clienteId));
   for (const e of pend) {
     const v = e.data(); if (!v.chatid || DRY) continue;
@@ -145,6 +146,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     } catch (err) { L('erro resposta'); }
   }
 
+  if (!envia) { await marca(extraCfg); L('mensagens desligadas'); return; }
   if (!dentro) { await marca(extraCfg); L('fora do horário de envio'); return; }
 
   /* 3) fila de envios */
