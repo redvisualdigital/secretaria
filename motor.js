@@ -62,13 +62,15 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     const p = pd.data(); const ini = toMin(p.hora), fim = ini + (Number(p.duracao) || 60);
     const bloq = (geral.bloqueios || []).some(b => b.data === p.data && (!b.profId || b.profId === 'todas' || b.profId === p.profId) && (b.diaTodo || (ini < toMin(b.ate) && fim > toMin(b.de))));
     if (DRY) { console.log('DRY pedido', p.nome, p.data, p.hora); continue; }
-    if (bloq || conflito(ags, p.profId, p.data, ini, fim)) { await pd.ref.update({ status: 'conflito', processadoEm: new Date().toISOString() }); console.log('pedido em conflito', pd.id); continue; }
+    const svp = (geral.servicos || []).find(x => x.id === p.servicoId) || {};
+    const profsP = (svp.divisao || []).length ? svp.divisao.map(d => d.profId) : [p.profId];
+    if (bloq || profsP.some(pf => conflito(ags, pf, p.data, ini, fim) || ags.some(x => x.data === p.data && (x.divisao || []).some(d => d.profId === pf) && !['cancelado','faltou'].includes(x.status) && ini < toMin(x.hora) + (Number(x.duracao) || 60) && fim > toMin(x.hora)))) { await pd.ref.update({ status: 'conflito', processadoEm: new Date().toISOString() }); console.log('pedido em conflito', pd.id); continue; }
     let cli = Object.values(clientes).find(c => dig8(c.telefone) && dig8(c.telefone) === dig8(p.telefone));
     if (!cli) { const r = db.collection('clientes').doc(); cli = { id: r.id, nome: p.nome, telefone: p.telefone, obs: 'Cadastrada pelo site', criadoEm: hoje, ...(p.nascimento ? { nascimento: p.nascimento } : {}) }; await r.set(cli); clientes[cli.id] = cli; }
     else if (p.nascimento && !cli.nascimento) await db.collection('clientes').doc(cli.id).update({ nascimento: p.nascimento });
     const sv = (geral.servicos || []).find(x => x.id === p.servicoId) || {};
     const agRef = db.collection('agendamentos').doc();
-    const ag = { clienteId: cli.id, profId: p.profId || sv.profId || '', divisao: [], servicos: [{ id: sv.id || p.servicoId || '', nome: sv.nome || p.servicoNome, preco: sv.preco ?? null, duracao: Number(p.duracao) || sv.duracao || 60 }], servicoId: sv.id || p.servicoId || '', servicoNome: sv.nome || p.servicoNome, domicilio: null, data: p.data, hora: p.hora, valor: sv.preco ?? null, duracao: Number(p.duracao) || sv.duracao || 60, obs: 'Agendado pelo site', status: 'agendado', origem: 'site', criadoEm: new Date().toISOString() };
+    const ag = { clienteId: cli.id, profId: sv.profId || ((sv.divisao || [])[0] || {}).profId || p.profId || '', divisao: sv.divisao || [], servicos: [{ id: sv.id || p.servicoId || '', nome: sv.nome || p.servicoNome, preco: sv.preco ?? null, duracao: Number(p.duracao) || sv.duracao || 60 }], servicoId: sv.id || p.servicoId || '', servicoNome: sv.nome || p.servicoNome, domicilio: null, data: p.data, hora: p.hora, valor: sv.preco ?? null, duracao: Number(p.duracao) || sv.duracao || 60, obs: 'Agendado pelo site', status: 'agendado', origem: 'site', criadoEm: new Date().toISOString() };
     await agRef.set(ag); ags.push({ id: agRef.id, ...ag });
     await pd.ref.update({ status: 'feito', agId: agRef.id, processadoEm: new Date().toISOString() });
     console.log('pedido do site → agenda', p.data, p.hora);
@@ -77,7 +79,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   /* 0b) o que o site público pode ver: catálogo e horários ocupados (sem nome de cliente) */
   if (!DRY) {
     const exp = cfg.expediente || { ini: '08:00', fim: '18:00', passo: 30, dias: [1, 2, 3, 4, 5, 6] };
-    const servPub = (geral.servicos || []).filter(x => x.duracao && x.profId && !(x.divisao || []).length).map(x => ({ id: x.id, nome: x.nome, preco: x.preco ?? null, duracao: x.duracao, profId: x.profId }));
+    const servPub = (geral.servicos || []).filter(x => x.duracao && (x.profId || (x.divisao || []).length)).map(x => { const profs = (x.divisao || []).length ? x.divisao.map(d => d.profId) : [x.profId]; return { id: x.id, nome: x.nome, preco: x.preco ?? null, duracao: x.duracao, profId: x.profId || profs[0], profs, combo: profs.length > 1 }; });
     await db.doc('publico/catalogo').set({ estudio: geral.estudio || '', profissionais: (geral.profissionais || []).map(x => ({ id: x.id, nome: x.nome })), servicos: servPub, expediente: exp, atualizadoEm: new Date().toISOString() });
     const ate = addDias(hoje, 45), ocup = {};
     for (const a of ags) { if (a.data > ate || ['cancelado', 'faltou'].includes(a.status)) continue; const k = a.data; (ocup[k] = ocup[k] || []).push([a.profId || '', toMin(a.hora), toMin(a.hora) + (Number(a.duracao) || 60)]); for (const d of (a.divisao || [])) if (d.profId && d.profId !== a.profId) ocup[k].push([d.profId, toMin(a.hora), toMin(a.hora) + (Number(a.duracao) || 60)]); }
