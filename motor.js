@@ -21,7 +21,7 @@ const quando = (data, hoje) => { if (data === hoje) return 'hoje'; if (data === 
 const nomeServ = s => String(s || 'atendimento').split(' + ').map(x => x.replace(/^Combo\s+/i, '').replace(/\s*·\s*(colocação|manutenção.*)$/i, '').trim()).join(' + ');
 const primeiro = n => String(n || '').trim().split(/\s+/)[0] || '';
 const TXT = {
-  confirmacao: (c, a, hoje, cfg) => `Oii ${primeiro(c.nome)}, seu horário de ${nomeServ(a.servicoNome)} está marcado para ${quando(a.data, hoje)} às ${a.hora}. 💗${cfg && cfg.endereco ? ` Fica na ${cfg.endereco}.` : ''} Qualquer mudança, é só responder aqui.`,
+  confirmacao: (c, a, hoje, cfg) => `Oii ${primeiro(c.nome)}, seu horário de ${nomeServ(a.servicoNome)} está marcado para ${quando(a.data, hoje)} às ${a.hora}. 💗${cfg && cfg.endereco ? ` Te espero na ${cfg.endereco}.` : ''} Qualquer mudança, é só me avisar por aqui.`,
   lembrete: (c, a, hoje) => `Oii ${primeiro(c.nome)}, posso confirmar seu horário de ${nomeServ(a.servicoNome)} ${quando(a.data, hoje)} às ${a.hora}? É só me responder "sim" ou "não". 💗`,
 };
 
