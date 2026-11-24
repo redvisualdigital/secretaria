@@ -21,7 +21,7 @@ const quando = (data, hoje) => { if (data === hoje) return 'hoje'; if (data === 
 const nomeServ = s => String(s || 'atendimento').split(' + ').map(x => x.replace(/^Combo\s+/i, '').replace(/\s*·\s*(colocação|manutenção.*)$/i, '').trim()).join(' + ');
 const primeiro = n => String(n || '').trim().split(/\s+/)[0] || '';
 const TXT = {
-  confirmacao: (c, a, hoje) => `Oii ${primeiro(c.nome)}, seu horário de ${nomeServ(a.servicoNome)} está marcado para ${quando(a.data, hoje)} às ${a.hora}. 💗 Qualquer mudança, é só responder aqui.`,
+  confirmacao: (c, a, hoje, cfg) => `Oii ${primeiro(c.nome)}, seu horário de ${nomeServ(a.servicoNome)} está marcado para ${quando(a.data, hoje)} às ${a.hora}. 💗${cfg && cfg.endereco ? ` Fica na ${cfg.endereco}.` : ''} Qualquer mudança, é só responder aqui.`,
   lembrete: (c, a, hoje) => `Oii ${primeiro(c.nome)}, posso confirmar seu horário de ${nomeServ(a.servicoNome)} ${quando(a.data, hoje)} às ${a.hora}? É só me responder "sim" ou "não". 💗`,
 };
 
@@ -128,7 +128,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   }
   for (const f of fila) {
     if (restante <= 0) { console.log('limite atingido; o resto vai na próxima rodada'); break; }
-    const texto = TXT[f.tipo](f.c, f.a, hoje);
+    const texto = TXT[f.tipo](f.c, f.a, hoje, cfg);
     if (!liberado(f.c.telefone)) { console.log(`(teste) não enviado a ${f.c.nome}: ${f.tipo}`); continue; }
     if (DRY) { console.log(`DRY ${f.tipo} → ${f.c.nome} (${numeroBR(f.c.telefone)}): ${texto}`); restante--; continue; }
     try {
