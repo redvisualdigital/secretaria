@@ -41,7 +41,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   const cfgRef = db.doc('config/secretaria');
   let cfg = (await cfgRef.get()).data();
   if (!cfg) { cfg = { ativo: true, inicio: new Date().toISOString(), tipos: { confirmacao: true, lembrete: true, sumida: false, aniversario: false }, limiteDia: 20, porRodada: 5, janela: ['08:00', '20:00'], lembreteDe: '09:00' }; if (!DRY) await cfgRef.set(cfg); }
-  console.log(`[${hoje} ${hm}] ativo=${cfg.ativo} teste=${TESTE.join(',') || 'NÃO (todos)'} dry=${DRY}`);
+  console.log(`[${hoje} ${hm}] ativo=${cfg.ativo} teste=${TESTE.length ? 'sim' : 'não'} dry=${DRY}`); /* log sem nome, telefone ou texto de cliente: o repositório é público */
   if (!cfg.ativo) return;
   const FORCAR = process.env.FORCAR === '1';
   const dentro = FORCAR || (hm >= cfg.janela[0] && hm <= cfg.janela[1]);
@@ -61,7 +61,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   for (const pd of pedidos) {
     const p = pd.data(); const ini = toMin(p.hora), fim = ini + (Number(p.duracao) || 60);
     const bloq = (geral.bloqueios || []).some(b => b.data === p.data && (!b.profId || b.profId === 'todas' || b.profId === p.profId) && (b.diaTodo || (ini < toMin(b.ate) && fim > toMin(b.de))));
-    if (DRY) { console.log('DRY pedido', p.nome, p.data, p.hora); continue; }
+    if (DRY) { console.log('DRY pedido', pd.id); continue; }
     const svp = (geral.servicos || []).find(x => x.id === p.servicoId) || {};
     const profsP = (svp.divisao || []).length ? svp.divisao.map(d => d.profId) : [p.profId];
     if (bloq || profsP.some(pf => conflito(ags, pf, p.data, ini, fim) || ags.some(x => x.data === p.data && (x.divisao || []).some(d => d.profId === pf) && !['cancelado','faltou'].includes(x.status) && ini < toMin(x.hora) + (Number(x.duracao) || 60) && fim > toMin(x.hora)))) { await pd.ref.update({ status: 'conflito', processadoEm: new Date().toISOString() }); console.log('pedido em conflito', pd.id); continue; }
@@ -73,7 +73,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     const ag = { clienteId: cli.id, profId: sv.profId || ((sv.divisao || [])[0] || {}).profId || p.profId || '', divisao: sv.divisao || [], servicos: [{ id: sv.id || p.servicoId || '', nome: sv.nome || p.servicoNome, preco: sv.preco ?? null, duracao: Number(p.duracao) || sv.duracao || 60 }], servicoId: sv.id || p.servicoId || '', servicoNome: sv.nome || p.servicoNome, domicilio: null, data: p.data, hora: p.hora, valor: sv.preco == null ? null : sv.preco + (Number(p.acrescimo) || 0), duracao: Number(p.duracao) || sv.duracao || 60, obs: 'Agendado pelo site' + (Number(p.acrescimo) ? ` · domingo/feriado +R$ ${Number(p.acrescimo)}` : ''), status: 'agendado', origem: 'site', criadoEm: new Date().toISOString() };
     await agRef.set(ag); ags.push({ id: agRef.id, ...ag });
     await pd.ref.update({ status: 'feito', agId: agRef.id, processadoEm: new Date().toISOString() });
-    console.log('pedido do site → agenda', p.data, p.hora);
+    console.log('pedido do site → agenda', pd.id);
   }
 
   /* 0b) o que o site público pode ver: catálogo e horários ocupados (sem nome de cliente) */
@@ -110,7 +110,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
           : `Tudo bem, ${primeiro(cl.nome)}! Vou liberar esse horário. Se quiser marcar outro dia, é só escolher aqui: ${cfg.linkSite || ''} 💗`;
         try { await uaz('/send/text', { number: v.chatid.split('@')[0], text: txt, delay: 2000, track_source: 'secretaria', track_id: 'resp-' + e.id }); await e.ref.update({ respostaEnviada: txt }); } catch (err) { console.log('erro resposta envio', err.message); }
       }
-      console.log(`resposta ${v.agId}: ${sim ? 'SIM' : nao ? 'NÃO' : 'outra'} (${t.slice(0, 40)})`);
+      console.log(`resposta ${v.agId}: ${sim ? 'SIM' : nao ? 'NÃO' : 'outra'}`);
     } catch (err) { console.log('erro resposta', err.message); }
   }
 
@@ -129,15 +129,15 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   for (const f of fila) {
     if (restante <= 0) { console.log('limite atingido; o resto vai na próxima rodada'); break; }
     const texto = TXT[f.tipo](f.c, f.a, hoje, cfg);
-    if (!liberado(f.c.telefone)) { console.log(`(teste) não enviado a ${f.c.nome}: ${f.tipo}`); continue; }
+    if (!liberado(f.c.telefone)) { console.log(`(teste) segurado: ${f.id}`); continue; }
     if (DRY) { console.log(`DRY ${f.tipo} → ${f.c.nome} (${numeroBR(f.c.telefone)}): ${texto}`); restante--; continue; }
     try {
       const r = await uaz('/send/text', { number: numeroBR(f.c.telefone), text: texto, delay: 3000, track_source: 'secretaria', track_id: f.id });
       await envCol.doc(f.id).set({ tipo: f.tipo, agId: f.a.id, clienteId: f.c.id, chatid: r.chatid || null, msgId: r.messageid || r.id || null, texto, dia: hoje, enviadoEm: new Date().toISOString(), enviadoTs: Math.floor(Date.now() / 1000), resposta: null });
       if (f.tipo === 'lembrete') await db.collection('agendamentos').doc(f.a.id).update({ confEnviadaEm: `${hoje} ${agoraBR().hm}` }); /* mesmo formato que a agenda usa: a faixa "Confirmar horários" mostra "Mensagem enviada HH:MM" */
-      console.log(`ENVIADO ${f.tipo} → ${f.c.nome}`); restante--;
+      console.log(`ENVIADO ${f.id}`); restante--;
       await espera(20000 + Math.random() * 25000);
-    } catch (err) { console.log('erro envio', f.id, err.message); }
+    } catch (err) { console.log('erro envio', f.id, String(err.message).replace(/\d{8,}/g, '…')); }
   }
   console.log(`fila=${fila.length} enviadosHoje=${envHoje + (cfg.porRodada - restante)}`);
 })().then(() => process.exit(0)).catch(e => { console.error('ERRO', e); process.exit(1); });
