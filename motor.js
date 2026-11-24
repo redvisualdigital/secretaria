@@ -30,7 +30,7 @@ const entre = (a, b) => { const [, ma, da] = a.split('-').map(Number), [, mb, db
 const toMin = h => { const [a, b] = String(h || '0:0').split(':'); return (+a) * 60 + (+b || 0); };
 
 /* ---------- textos ---------- */
-const nomeServ = s => String(s || 'atendimento').split(' + ').map(x => x.replace(/^Combo\s+/i, '').replace(/\s*·\s*(colocação|manutenção.*)$/i, '').trim()).join(' + ');
+const nomeServ = s => String(s || 'atendimento').replace(/\s*\([^)]*\)/g, '').split(' + ').map(x => x.replace(/\s*\([^)]*\)\s*$/, '').replace(/\s*·\s*(colocação|manutenção.*)$/i, '').trim()).join(' + '); /* sem o que vem entre parênteses: "Retorno Brow Lamination", "Combo Essencial" */
 const minusc = n => /brow|lash/i.test(n) ? n : n.charAt(0).toLowerCase() + n.slice(1);
 const primeiro = n => String(n || '').trim().split(/\s+/)[0] || '';
 const ehSobrancelha = n => /sobrancelh|design|henna|brow|lamination/i.test(String(n || ''));
@@ -154,7 +154,7 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   const wa = a => a.wa || {};
   for (const a of ags) {
     const c = clientes[a.clienteId]; if (!c || !numeroBR(c.telefone)) continue;
-    if (vale('confirmacao') && a.status === 'agendado' && String(a.criadoEm || '') >= (cfg.inicio || '') && !wa(a).conf) fila.push({ id: 'conf-' + a.id, tipo: 'confirmacao', a, c });
+    if (vale('confirmacao') && a.status === 'agendado' && (String(a.criadoEm || '') >= (cfg.inicio || '') || (cfg.antigosAte && a.data <= cfg.antigosAte)) && !wa(a).conf) /* antigosAte: horários marcados antes da secretária também confirmam, só até essa data (liberação de 24/11) */ fila.push({ id: 'conf-' + a.id, tipo: 'confirmacao', a, c });
     /* quem agendou na véspera (ou no mesmo dia) acabou de receber a confirmação: não precisa de lembrete */
     if (vale('lembrete') && a.status === 'agendado' && a.data === addDias(hoje, 1) && !(diaBR(a.criadoEm) >= addDias(a.data, -1)) && (FORCAR || hm >= (cfg.lembreteDe || '09:00')) && !wa(a).lemb) fila.push({ id: 'lemb-' + a.id, tipo: 'lembrete', a, c });
   }
