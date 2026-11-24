@@ -113,7 +113,9 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   for (const a of ags) {
     const c = clientes[a.clienteId]; if (!c || !numeroBR(c.telefone)) continue;
     if (cfg.tipos.confirmacao && a.status === 'agendado' && String(a.criadoEm || '') >= cfg.inicio && await novo('conf-' + a.id)) fila.push({ id: 'conf-' + a.id, tipo: 'confirmacao', a, c });
-    if (cfg.tipos.lembrete && a.status === 'agendado' && a.data === addDias(hoje, 1) && (FORCAR || hm >= cfg.lembreteDe) && await novo('lemb-' + a.id)) fila.push({ id: 'lemb-' + a.id, tipo: 'lembrete', a, c });
+    const criadoBR = a.criadoEm ? new Date(new Date(a.criadoEm).getTime() - 3 * 3600e3).toISOString().slice(0, 10) : '';
+    /* quem agendou no dia anterior (ou no mesmo dia) acabou de receber a confirmação: não precisa de lembrete */
+    if (cfg.tipos.lembrete && a.status === 'agendado' && a.data === addDias(hoje, 1) && !(criadoBR && criadoBR >= addDias(a.data, -1)) && (FORCAR || hm >= cfg.lembreteDe) && await novo('lemb-' + a.id)) fila.push({ id: 'lemb-' + a.id, tipo: 'lembrete', a, c });
   }
   for (const f of fila) {
     if (restante <= 0) { console.log('limite atingido; o resto vai na próxima rodada'); break; }
