@@ -52,6 +52,40 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   const envHoje = (await envCol.where('dia', '==', hoje).get()).size;
   let restante = Math.max(0, Math.min(cfg.porRodada, cfg.limiteDia - envHoje));
 
+  /* 0a) pedidos do site viram agendamento (o site só cria pedido; quem grava na agenda é o motor) */
+  const toMin = h => { const [a, b] = String(h || '0:0').split(':'); return (+a) * 60 + (+b || 0); };
+  const dig8 = t => digitos(t).slice(-8);
+  const conflito = (lista, profId, data, ini, fim) => lista.some(x => x.data === data && (x.profId === profId || !x.profId) && !['cancelado', 'faltou'].includes(x.status) && ini < toMin(x.hora) + (Number(x.duracao) || 60) && fim > toMin(x.hora));
+  const geral = (await db.doc('config/geral').get()).data() || {};
+  const pedidos = (await db.collection('pedidos_site').where('status', '==', 'novo').get()).docs;
+  for (const pd of pedidos) {
+    const p = pd.data(); const ini = toMin(p.hora), fim = ini + (Number(p.duracao) || 60);
+    const bloq = (geral.bloqueios || []).some(b => b.data === p.data && (!b.profId || b.profId === 'todas' || b.profId === p.profId) && (b.diaTodo || (ini < toMin(b.ate) && fim > toMin(b.de))));
+    if (DRY) { console.log('DRY pedido', p.nome, p.data, p.hora); continue; }
+    if (bloq || conflito(ags, p.profId, p.data, ini, fim)) { await pd.ref.update({ status: 'conflito', processadoEm: new Date().toISOString() }); console.log('pedido em conflito', pd.id); continue; }
+    let cli = Object.values(clientes).find(c => dig8(c.telefone) && dig8(c.telefone) === dig8(p.telefone));
+    if (!cli) { const r = db.collection('clientes').doc(); cli = { id: r.id, nome: p.nome, telefone: p.telefone, obs: 'Cadastrada pelo site', criadoEm: hoje, ...(p.nascimento ? { nascimento: p.nascimento } : {}) }; await r.set(cli); clientes[cli.id] = cli; }
+    else if (p.nascimento && !cli.nascimento) await db.collection('clientes').doc(cli.id).update({ nascimento: p.nascimento });
+    const sv = (geral.servicos || []).find(x => x.id === p.servicoId) || {};
+    const agRef = db.collection('agendamentos').doc();
+    const ag = { clienteId: cli.id, profId: p.profId || sv.profId || '', divisao: [], servicos: [{ id: sv.id || p.servicoId || '', nome: sv.nome || p.servicoNome, preco: sv.preco ?? null, duracao: Number(p.duracao) || sv.duracao || 60 }], servicoId: sv.id || p.servicoId || '', servicoNome: sv.nome || p.servicoNome, domicilio: null, data: p.data, hora: p.hora, valor: sv.preco ?? null, duracao: Number(p.duracao) || sv.duracao || 60, obs: 'Agendado pelo site', status: 'agendado', origem: 'site', criadoEm: new Date().toISOString() };
+    await agRef.set(ag); ags.push({ id: agRef.id, ...ag });
+    await pd.ref.update({ status: 'feito', agId: agRef.id, processadoEm: new Date().toISOString() });
+    console.log('pedido do site → agenda', p.data, p.hora);
+  }
+
+  /* 0b) o que o site público pode ver: catálogo e horários ocupados (sem nome de cliente) */
+  if (!DRY) {
+    const exp = cfg.expediente || { ini: '08:00', fim: '18:00', passo: 30, dias: [1, 2, 3, 4, 5, 6] };
+    const servPub = (geral.servicos || []).filter(x => x.duracao && x.profId && !(x.divisao || []).length).map(x => ({ id: x.id, nome: x.nome, preco: x.preco ?? null, duracao: x.duracao, profId: x.profId }));
+    await db.doc('publico/catalogo').set({ estudio: geral.estudio || '', profissionais: (geral.profissionais || []).map(x => ({ id: x.id, nome: x.nome })), servicos: servPub, expediente: exp, atualizadoEm: new Date().toISOString() });
+    const ate = addDias(hoje, 45), ocup = {};
+    for (const a of ags) { if (a.data > ate || ['cancelado', 'faltou'].includes(a.status)) continue; const k = a.data; (ocup[k] = ocup[k] || []).push([a.profId || '', toMin(a.hora), toMin(a.hora) + (Number(a.duracao) || 60)]); for (const d of (a.divisao || [])) if (d.profId && d.profId !== a.profId) ocup[k].push([d.profId, toMin(a.hora), toMin(a.hora) + (Number(a.duracao) || 60)]); }
+    for (const b of (geral.bloqueios || [])) { if (b.data < hoje || b.data > ate) continue; (ocup[b.data] = ocup[b.data] || []).push([b.profId && b.profId !== 'todas' ? b.profId : '', b.diaTodo ? 0 : toMin(b.de), b.diaTodo ? 1440 : toMin(b.ate)]); }
+    const plano = {}; for (const [d, l] of Object.entries(ocup)) plano[d] = l.map(x => x.join('|'));
+    await db.doc('publico/agenda').set({ ocupados: plano, atualizadoEm: new Date().toISOString() });
+  }
+
   /* 1) respostas ao lembrete: "sim" confirma na agenda */
   const pend = (await envCol.where('tipo', '==', 'lembrete').where('resposta', '==', null).get()).docs;
   for (const e of pend) {
