@@ -25,6 +25,14 @@ const TXT = {
   lembrete: (c, a, hoje) => `Oii ${primeiro(c.nome)}, posso confirmar seu horário de ${nomeServ(a.servicoNome)} ${quando(a.data, hoje)} às ${a.hora}? É só me responder "sim" ou "não". 💗`,
 };
 
+const MES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const dExt = ymd => { const [y, m, d] = ymd.split('-').map(Number); return `${d} de ${MES[m - 1]}`; };
+const entre = (a, b) => { const [, ma, da] = a.split('-').map(Number), [, mb, db] = b.split('-').map(Number); return ma === mb ? `entre os dias ${da} e ${db} de ${MES[mb - 1]}` : `entre o dia ${dExt(a)} e o dia ${dExt(b)}`; };
+const ehSobrancelha = n => /sobrancelh|design|henna|brow|lamination/i.test(String(n || ''));
+/* chamada de retorno (pedido da Lyslie, 24/11): sai no dia combinado, com a janela ideal e o link */
+const minusc = n => /brow|lash/i.test(n) ? n : n.charAt(0).toLowerCase() + n.slice(1);
+TXT.retorno = (c, r, cfg) => `Oii ${primeiro(c.nome)}, seu último ${minusc(nomeServ(r.servicoNome))} foi dia ${dExt(r.dataAtendimento)} e, ${ehSobrancelha(r.servicoNome) ? 'pra manter suas sobrancelhas lindas' : 'pra manter tudo sempre lindo'}, o ideal é que você retorne ${entre(addDias(r.dataAtendimento, r.de || 20), addDias(r.dataAtendimento, r.ate || 30))}. Vou te enviar o link pra você ver quais horários tenho disponíveis pra te atender: ${cfg.linkSite || ''} 💗`;
+
 /* ---------- WhatsApp (Uazapi) ---------- */
 const digitos = t => String(t || '').replace(/\D/g, '');
 const numeroBR = t => { let d = digitos(t); if (d.startsWith('55') && d.length >= 12) d = d.slice(2); return d.length >= 10 ? '55' + d : null; };
@@ -126,14 +134,26 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
     /* quem agendou no dia anterior (ou no mesmo dia) acabou de receber a confirmação: não precisa de lembrete */
     if (cfg.tipos.lembrete && a.status === 'agendado' && a.data === addDias(hoje, 1) && !(criadoBR && criadoBR >= addDias(a.data, -1)) && (FORCAR || hm >= cfg.lembreteDe) && await novo('lemb-' + a.id)) fila.push({ id: 'lemb-' + a.id, tipo: 'lembrete', a, c });
   }
+  /* chamadas de retorno agendadas na agenda (botão "Chamar para retorno daqui 15 dias") */
+  if (cfg.tipos.retorno !== false) {
+    const rets = (await db.collection('secretaria_retornos').where('status', '==', 'agendado').get()).docs;
+    for (const rd of rets) {
+      const r = rd.data(); if (r.enviarEm > hoje) continue;
+      const c = clientes[r.clienteId]; if (!c || !numeroBR(c.telefone)) { if (!DRY) await rd.ref.update({ status: 'sem-telefone' }); continue; }
+      const jaMarcou = ags.some(x => x.clienteId === r.clienteId && x.data >= hoje && ['agendado', 'confirmado'].includes(x.status));
+      if (jaMarcou) { if (!DRY) await rd.ref.update({ status: 'ja-marcou', vistoEm: new Date().toISOString() }); console.log('retorno dispensado (já marcou)', rd.id); continue; }
+      fila.push({ id: rd.id, tipo: 'retorno', a: r, c, ref: rd.ref });
+    }
+  }
   for (const f of fila) {
     if (restante <= 0) { console.log('limite atingido; o resto vai na próxima rodada'); break; }
-    const texto = TXT[f.tipo](f.c, f.a, hoje, cfg);
+    const texto = f.tipo === 'retorno' ? TXT.retorno(f.c, f.a, cfg) : TXT[f.tipo](f.c, f.a, hoje, cfg);
     if (!liberado(f.c.telefone)) { console.log(`(teste) segurado: ${f.id}`); continue; }
     if (DRY) { console.log(`DRY ${f.tipo} → ${f.c.nome} (${numeroBR(f.c.telefone)}): ${texto}`); restante--; continue; }
     try {
       const r = await uaz('/send/text', { number: numeroBR(f.c.telefone), text: texto, delay: 3000, track_source: 'secretaria', track_id: f.id });
-      await envCol.doc(f.id).set({ tipo: f.tipo, agId: f.a.id, clienteId: f.c.id, chatid: r.chatid || null, msgId: r.messageid || r.id || null, texto, dia: hoje, enviadoEm: new Date().toISOString(), enviadoTs: Math.floor(Date.now() / 1000), resposta: null });
+      await envCol.doc(f.id).set({ tipo: f.tipo, agId: f.a.id || f.a.agendamentoId || null, clienteId: f.c.id, chatid: r.chatid || null, msgId: r.messageid || r.id || null, texto, dia: hoje, enviadoEm: new Date().toISOString(), enviadoTs: Math.floor(Date.now() / 1000), resposta: null });
+      if (f.tipo === 'retorno' && f.ref) await f.ref.update({ status: 'enviado', enviadoEm: new Date().toISOString() });
       if (f.tipo === 'lembrete') await db.collection('agendamentos').doc(f.a.id).update({ confEnviadaEm: `${hoje} ${agoraBR().hm}` }); /* mesmo formato que a agenda usa: a faixa "Confirmar horários" mostra "Mensagem enviada HH:MM" */
       console.log(`ENVIADO ${f.id}`); restante--;
       await espera(20000 + Math.random() * 25000);
