@@ -147,7 +147,9 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
       const clara = [...msgs].reverse().find(m => ehSim(m.t) || ehNao(m.t));
       if (!clara) {
         const ult = msgs[msgs.length - 1];
-        if (v.resposta !== 'outra' || v.respostaTexto !== ult.t.slice(0, 200)) await e.ref.update({ resposta: 'outra', respostaTexto: ult.t.slice(0, 200), respondidoEm: agoraISO() });
+        if (v.resposta !== 'outra' || v.respostaTexto !== ult.t.slice(0, 200)) await e.ref.update({ resposta: 'outra', respostaTexto: ult.t.slice(0, 200), respondidoEm: agoraISO(), avisoOutra: true });
+        /* um aviso só por lembrete na agenda: "Fulana respondeu o lembrete, confira" (com o texto e o botão da conversa) */
+        if (!v.avisoOutra) { const cl = clientes[v.clienteId] || {}; await avisos.add({ tipo: 'respondeu', nome: cl.nome || '', telefone: cl.telefone || '', resposta: ult.t.slice(0, 80), servico: ag.servicoNome || '', data: ag.data, hora: ag.hora, agId: v.agId, criadoEm: agoraISO() }); }
         L(`resposta ${v.agId}: outra (continua esperando sim/não)`); continue;
       }
       const sim = ehSim(clara.t), nao = !sim;
