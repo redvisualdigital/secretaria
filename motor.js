@@ -121,28 +121,45 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
   if (!DRY && cfg.hashCatalogo !== hCat) { await db.doc('publico/catalogo').set({ ...catalogo, atualizadoEm: agoraISO() }); extraCfg.hashCatalogo = hCat; }
   if (!DRY && cfg.hashAgenda !== hAg) { await db.doc('publico/agenda').set({ ocupados: ocup, atualizadoEm: agoraISO() }); extraCfg.hashAgenda = hAg; }
 
-  /* 2) respostas ao lembrete: "sim" confirma, "não" libera o horário; a secretária responde */
-  const pend = envia ? (await envCol.where('tipo', '==', 'lembrete').where('resposta', '==', null).get()).docs : [];
+  /* 2) respostas ao lembrete: "sim" confirma, "não" libera o horário; a secretária responde.
+     Vale a resposta clara mais nova. Conversa solta ("kkk", "bom dia", "deixa eu ver") NÃO encerra: a secretária continua lendo
+     até aparecer um sim/não, até o horário do atendimento passar ou até 3 dias (correção de 26/11: o "não" do Iago veio depois de um "kkkk"). */
+  const ehSim = t => /^(sim|s|confirmo|confirmado|confirma|pode confirmar|ok|okay|👍|✅)(?![a-zà-ú])/.test(t);
+  const ehNao = t => /^(n[aã]o+|nao posso|não vou)(?![a-zà-ú])(?!\s+sei)/.test(t);
+  const pend = envia ? [
+    ...(await envCol.where('tipo', '==', 'lembrete').where('resposta', '==', null).get()).docs,
+    ...(await envCol.where('tipo', '==', 'lembrete').where('resposta', '==', 'outra').get()).docs,
+  ] : [];
   await carregaClientes(pend.map(e => e.data().clienteId));
   for (const e of pend) {
     const v = e.data(); if (!v.chatid || DRY) continue;
-    if (v.enviadoTs && Date.now() / 1000 - v.enviadoTs > 3 * 86400) { await e.ref.update({ resposta: 'sem-resposta' }); continue; }
+    if (v.enviadoTs && Date.now() / 1000 - v.enviadoTs > 3 * 86400) { await e.ref.update({ resposta: v.resposta === 'outra' ? 'outra-encerrada' : 'sem-resposta' }); continue; }
     try {
+      const agRef = db.collection('agendamentos').doc(v.agId); const ag = (await agRef.get()).data() || {};
+      /* horário já passou ou a agenda já mudou o status na mão: para de escutar */
+      const passou = ag.data && (ag.data < hoje || (ag.data === hoje && ag.hora && ag.hora <= hm));
+      if (!ag.data || passou || ['cancelado', 'concluido', 'faltou'].includes(ag.status)) { await e.ref.update({ resposta: v.resposta === 'outra' ? 'outra-encerrada' : 'sem-resposta' }); continue; }
       const j = await uaz('/message/find', { chatid: v.chatid, limit: 15, offset: 0 });
-      const msgs = (j.messages || j.data || []).filter(m => !m.fromMe && Number(m.messageTimestamp) > v.enviadoTs);
+      const msgs = (j.messages || j.data || []).filter(m => !m.fromMe && Number(m.messageTimestamp) > v.enviadoTs)
+        .map(m => ({ ts: Number(m.messageTimestamp), t: String(m.text || m.content?.text || '').trim().toLowerCase() }))
+        .sort((a, b) => a.ts - b.ts);
       if (!msgs.length) continue;
-      const t = String(msgs[msgs.length - 1].text || msgs[msgs.length - 1].content?.text || '').trim().toLowerCase();
-      const sim = /^(sim|s|confirmo|confirmado|pode confirmar|ok|👍|✅)\b/.test(t) || t === 'sim!';
-      const nao = /^(n[aã]o|nao posso|não vou)/.test(t);
-      await e.ref.update({ resposta: sim ? 'sim' : nao ? 'nao' : 'outra', respostaTexto: t.slice(0, 200), respondidoEm: agoraISO() });
-      const agRef = db.collection('agendamentos').doc(v.agId); const ag = (await agRef.get()).data() || {}; const cl = clientes[v.clienteId] || {};
+      const clara = [...msgs].reverse().find(m => ehSim(m.t) || ehNao(m.t));
+      if (!clara) {
+        const ult = msgs[msgs.length - 1];
+        if (v.resposta !== 'outra' || v.respostaTexto !== ult.t.slice(0, 200)) await e.ref.update({ resposta: 'outra', respostaTexto: ult.t.slice(0, 200), respondidoEm: agoraISO() });
+        L(`resposta ${v.agId}: outra (continua esperando sim/não)`); continue;
+      }
+      const sim = ehSim(clara.t), nao = !sim;
+      await e.ref.update({ resposta: sim ? 'sim' : 'nao', respostaTexto: clara.t.slice(0, 200), respondidoEm: agoraISO() });
+      const cl = clientes[v.clienteId] || {};
       if (sim) await agRef.update({ status: 'confirmado', confirmadoPor: 'whatsapp', confirmadoEm: agoraISO() });
       if (nao) { await agRef.update({ status: 'cancelado', canceladoPor: 'whatsapp', canceladoEm: agoraISO(), obs: ((ag.obs || '') + ' · cancelado pela cliente no WhatsApp').replace(/^ · /, '') }); await avisos.add({ tipo: 'cancelou', nome: cl.nome || '', servico: ag.servicoNome || '', data: ag.data, hora: ag.hora, agId: v.agId, criadoEm: agoraISO() }); }
-      if ((sim || nao) && liberado(cl.telefone)) {
+      if (liberado(cl.telefone)) {
         const txt = monta(cfg, sim ? 'sim' : 'nao', { nome: primeiro(cl.nome), servico: nomeServ(ag.servicoNome), quando: quando(ag.data, hoje), hora: ag.hora, endereco: cfg.endereco || '', link: cfg.linkSite || '' });
         try { await uaz('/send/text', { number: v.chatid.split('@')[0], text: txt, delay: 2000, track_source: 'secretaria', track_id: 'resp-' + e.id }); await e.ref.update({ respostaEnviada: txt }); } catch (err) { L('erro resposta envio'); }
       }
-      L(`resposta ${v.agId}: ${sim ? 'SIM' : nao ? 'NÃO' : 'outra'}`);
+      L(`resposta ${v.agId}: ${sim ? 'SIM' : 'NÃO'}`);
     } catch (err) { L('erro resposta'); }
   }
 
