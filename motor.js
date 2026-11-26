@@ -140,8 +140,11 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
       const passou = ag.data && (ag.data < hoje || (ag.data === hoje && ag.hora && ag.hora <= hm));
       if (!ag.data || passou || ['cancelado', 'concluido', 'faltou'].includes(ag.status)) { await e.ref.update({ resposta: v.resposta === 'outra' ? 'outra-encerrada' : 'sem-resposta' }); continue; }
       const j = await uaz('/message/find', { chatid: v.chatid, limit: 15, offset: 0 });
-      const msgs = (j.messages || j.data || []).filter(m => !m.fromMe && Number(m.messageTimestamp) > v.enviadoTs)
-        .map(m => ({ ts: Number(m.messageTimestamp), t: String(m.text || m.content?.text || '').trim().toLowerCase() }))
+      /* a Uazapi manda a hora da mensagem em milissegundos e o lembrete guarda em segundos: compara tudo em segundos.
+         Só vale o que a cliente mandou DEPOIS do lembrete (correção de 26/11: a pergunta da Cristiellen do dia anterior virou "resposta"). */
+      const seg = m => { const n = Number(m.messageTimestamp) || 0; return n > 1e12 ? n / 1000 : n; };
+      const msgs = (j.messages || j.data || []).filter(m => !m.fromMe && seg(m) > v.enviadoTs)
+        .map(m => ({ ts: seg(m), t: String(m.text || m.content?.text || '').trim().toLowerCase() }))
         .sort((a, b) => a.ts - b.ts);
       if (!msgs.length) continue;
       const clara = [...msgs].reverse().find(m => ehSim(m.t) || ehNao(m.t));
